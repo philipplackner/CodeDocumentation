@@ -1,5 +1,44 @@
 package com.plcoding.codedocumentation
 
+/**
+ * Processes a payment between two accounts.
+ *
+ * Example usage:
+ * ```
+ * val sender = Account(
+ *     id = "1",
+ *     balance = 100.0,
+ *     currency = Currency.EUR
+ * )
+ * val receiver = Account(
+ *     id = "2",
+ *     balance = 200.0,
+ *     currency = Currency.USD
+ * )
+ * val result = processPayment(
+ *     sender = sender,
+ *     receiver = receiver,
+ *     amount = 50.0,
+ *     transactionMode = TransactionMode.INSTANT,
+ *     notes = null,
+ *     feeStrategy = null
+ * )
+ * ```
+ *
+ * @param sender The account initiating the payment.
+ * @param receiver The account receiving the payment.
+ * @param amount The amount to be transferred in the currency of the sender.
+ * @param transactionMode The mode of the transaction. Can be either
+ * [TransactionMode.REGULAR] or [TransactionMode.INSTANT].
+ * @param notes Optional notes or description for the transaction.
+ * @param feeStrategy Optional strategy to calculate fees. When ignored,
+ * no fees will be applied.
+ * @param retryCount The amount of attempts made to process this payment.
+ *
+ * @return A [TransactionResult] representing the outcome of the transaction.
+ *
+ * @throws IllegalArgumentException if the amount is invalid.
+ */
 fun processPayment(
     sender: Account,
     receiver: Account,
@@ -13,12 +52,9 @@ fun processPayment(
         throw IllegalArgumentException("Invalid amount")
     }
 
-    if (receiver.currency != sender.currency) {
-        val conversionRate = getConversionRate(sender.currency, receiver.currency)
-        if (amount * conversionRate > sender.balance) {
-            return TransactionResult.Failure("Insufficient Funds")
-        }
-    } else if(amount > sender.balance) {
+    val fee = feeStrategy?.calculateFee(amount) ?: 0.0
+    val conversionRate = getConversionRate(sender.currency, receiver.currency)
+    if(!sender.hasSufficientFunds(amount, conversionRate, fee)) {
         return TransactionResult.Failure("Insufficient Funds")
     }
 
@@ -26,11 +62,8 @@ fun processPayment(
         return TransactionResult.Failure("Receiver doesn't support instant transactions")
     }
 
-    val fee = feeStrategy?.calculateFee(amount) ?: 0.0
-    if (fee + amount > sender.balance) {
-        return TransactionResult.Failure("Insufficient funds")
-    }
-
+    // Due to international compliance regulations, additional verification is needed
+    // if the sender's balance falls under 500 after a transaction.
     val remainingBalance = sender.balance - (amount + fee)
     if (remainingBalance < 500) {
         if (!performAdditionalVerification(sender)) {
@@ -68,6 +101,18 @@ data class Account(
     val currency: Currency,
 ) {
     fun supportsInstant(): Boolean = true
+
+    fun hasSufficientFunds(
+        paymentAmount: Double,
+        conversionRate: Double = 1.0,
+        fee: Double? = null
+    ): Boolean {
+        return if(fee != null) {
+            (paymentAmount + fee) * conversionRate <= balance
+        } else {
+            paymentAmount * conversionRate <= balance
+        }
+    }
 }
 
 enum class Currency {
